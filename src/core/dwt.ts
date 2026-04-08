@@ -6,7 +6,6 @@ import {
     estimateOriginalImageBytes,
 } from './compression-ratio';
 
-// 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 灏忔尝婊ゆ尝鍣?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 interface WaveletFilter {
     lo_d: number[];
@@ -16,8 +15,6 @@ interface WaveletFilter {
 }
 
 /**
- * 浠庡垎瑙ｄ綆閫氭护娉㈠櫒鎺ㄥ瀹屾暣鐨勬浜?鍙屾浜ゆ护娉㈠櫒缁勩€? * 瀵逛簬姝ｄ氦灏忔尝锛圚aar, Daubechies 绯诲垪锛夛細
- *   hi_d[n] = (-1)^n 路 lo_d[L-1-n]     (浜ゆ浛鍙嶈浆)
  *   lo_r = reverse(lo_d)
  *   hi_r = reverse(hi_d)
  */
@@ -80,9 +77,6 @@ function periodicRef(arr: number[], idx: number): number {
 }
 
 /**
- * 涓€缁村墠鍚?DWT锛堝垎瑙ｄ竴灞傦級銆? *
- * 浣跨敤 **鐩稿叧锛坈orrelation锛? 涓嬮噰鏍?* 绾﹀畾锛? *   cA[k] = 危_{j=0}^{L-1} lo[j] 路 x[2k + j]
- *   cD[k] = 危_{j=0}^{L-1} hi[j] 路 x[2k + j]
  *
  * Boundary uses periodic extension. Output length is ceil(N / 2). */
 function dwt1d(signal: number[], lo: number[], hi: number[]): { approx: number[]; detail: number[] } {
@@ -109,9 +103,6 @@ function dwt1d(signal: number[], lo: number[], hi: number[]): { approx: number[]
 }
 
 /**
- * 涓€缁撮€?DWT锛堥噸寤轰竴灞傦級銆? *
- * 涓庡墠鍚戠浉鍏崇害瀹氶厤濂楃殑 **杞疆閲嶅缓** 鍏紡锛? *   x[n] = 危_k lo[n-2k] 路 cA[k] + 危_k hi[n-2k] 路 cD[k]
- *          鍏朵腑浠呭 n-2k 鈭?[0, L-1] 鐨?k 姹傚拰
  *
  * Use analysis filters (lo_d, hi_d) to match the correlation-form forward transform.
  * Boundary uses periodic extension. */
@@ -122,7 +113,6 @@ function idwt1d(approx: number[], detail: number[], lo: number[], hi: number[], 
     for (let n = 0; n < outLen; n++) {
         let sum = 0;
         for (let j = 0; j < L; j++) {
-            // 婊ゆ尝鍣ㄧ储寮?j = n - 2k  鈫? 2k = n - j  鈫? k = (n - j) / 2
             // k may be negative; out-of-range samples are handled by periodic extension.
             const diff = n - j;
             if ((diff & 1) !== 0) continue; // must be even
@@ -135,9 +125,8 @@ function idwt1d(approx: number[], detail: number[], lo: number[], hi: number[], 
     return result;
 }
 
-// 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 2D DWT / IDWT 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/** 杞疆涓€涓?number[][] 鐭╅樀 */
+/** Transpose a `number[][]` matrix. */
 function transposeArr(mat: number[][]): number[][] {
     const rows = mat.length;
     const cols = mat[0]?.length ?? 0;
@@ -150,28 +139,22 @@ function transposeArr(mat: number[][]): number[][] {
     return out;
 }
 
-/**
- * 浜岀淮灏忔尝鍒嗚В鐨勪竴灞傜粨鏋溿€? */
 interface DWT2DLevel {
-    /** 杩戜技瀛愬甫 LL锛堢敤浜庡悗缁垎瑙ｆ垨鏈€缁堜繚鐣欙級 */
+    /** Approximation sub-band LL. */
     LL: number[][];
-    /** 姘村钩缁嗚妭瀛愬甫 LH */
+    /** Horizontal detail sub-band LH. */
     LH: number[][];
-    /** 鍨傜洿缁嗚妭瀛愬甫 HL */
+    /** Vertical detail sub-band HL. */
     HL: number[][];
-    /** 瀵硅缁嗚妭瀛愬甫 HH */
+    /** Diagonal detail sub-band HH. */
     HH: number[][];
-    /** 鍒嗚В鍓嶇殑琛屾暟锛堢敤浜庨€嗗彉鎹㈡仮澶嶅昂瀵革級 */
+    /** Original row count before this level decomposition. */
     origRows: number;
-    /** 鍒嗚В鍓嶇殑鍒楁暟 */
+    /** Original column count before this level decomposition. */
     origCols: number;
 }
 
-/**
- * 浜岀淮鍓嶅悜 DWT锛堝崟灞傦級銆? *
- * 姝ラ锛? * 1. 瀵规瘡涓€琛屽仛 1D DWT 鈫?[L 琛?| H 琛宂
- * 2. 瀵圭粨鏋滅殑姣忎竴鍒楀仛 1D DWT 鈫?鍥涗釜瀛愬甫 LL, LH, HL, HH
- */
+/** Single-level 2D forward DWT. */
 function dwt2dSingle(input: number[][], filter: WaveletFilter): DWT2DLevel {
     const rows = input.length;
     const cols = input[0]?.length ?? 0;
@@ -219,8 +202,7 @@ function dwt2dSingle(input: number[][], filter: WaveletFilter): DWT2DLevel {
     return { LL, LH, HL, HH, origRows: rows, origCols: cols };
 }
 
-/**
- * 浜岀淮閫?DWT锛堝崟灞傦級锛屼粠鍥涗釜瀛愬甫閲嶅缓鍑哄師鐭╅樀銆? */
+/** Single-level 2D inverse DWT. */
 function idwt2dSingle(level: DWT2DLevel, filter: WaveletFilter): number[][] {
     const { LL, LH, HL, HH, origRows, origCols } = level;
     // Inverse transform uses analysis filters, matching the correlation convention.
@@ -228,8 +210,6 @@ function idwt2dSingle(level: DWT2DLevel, filter: WaveletFilter): number[][] {
     const halfRows = LL.length;
     const halfCols = LL[0]?.length ?? 0;
 
-    // 姝ラ 1锛氭寜鍒楅€嗗彉鎹紝鎭㈠琛屾暟
-    // 瀵规瘡涓€鍒椾綅缃紝灏?LL/LH 鍒楀悎骞堕噸寤轰綆棰戣閮ㄥ垎锛孒L/HH 鍒楀悎骞堕噸寤洪珮棰戣閮ㄥ垎
     const rowLo: number[][] = Array.from({ length: origRows }, () => new Array<number>(halfCols));
     const rowHi: number[][] = Array.from({ length: origRows }, () => new Array<number>(halfCols));
 
@@ -255,7 +235,6 @@ function idwt2dSingle(level: DWT2DLevel, filter: WaveletFilter): number[][] {
         }
     }
 
-    // 姝ラ 2锛氭寜琛岄€嗗彉鎹紝鎭㈠鍒楁暟
     const result: number[][] = new Array(origRows);
     for (let r = 0; r < origRows; r++) {
         result[r] = idwt1d(rowLo[r], rowHi[r], lo_d, hi_d, origCols);
@@ -264,17 +243,21 @@ function idwt2dSingle(level: DWT2DLevel, filter: WaveletFilter): number[][] {
     return result;
 }
 
-// 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 澶氬眰鍒嗚В / 閲嶅缓 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 interface DWT2DDecomposition {
-    /** 鍚勫眰鐨勭粏鑺傚瓙甯?(LH, HL, HH)锛屼粠绗?0 灞傦紙鏈€缁嗭級鍒扮 levels-1 灞傦紙鏈€绮楋級 */
-    detailLevels: Array<{ LH: number[][]; HL: number[][]; HH: number[][]; origRows: number; origCols: number }>;
-    /** 鏈€缁堢殑浣庨杩戜技 LL */
-    approx: number[][];
+    /** Detail sub-bands for each level (LH/HL/HH), from fine to coarse. */
+    detailLevels: Array<{
+        LH: number[][];
+        HL: number[][];
+        HH: number[][];
+        origRows: number;
+        origCols: number;
+    }>;
+    /** Final low-frequency approximation LL. */
+    approx: Array<Array<number>>;
 }
 
-/**
- * 澶氬眰浜岀淮鍓嶅悜 DWT 鍒嗚В銆? * 瀵?LL 瀛愬甫閫掑綊鍒嗚В `levels` 灞傘€? */
+/** Multi-level 2D forward DWT decomposition. */
 function dwtDecompose2D(input: number[][], wavelet: DWTWavelet, levels: number): DWT2DDecomposition {
     const filter = getFilter(wavelet);
     const detailLevels: DWT2DDecomposition['detailLevels'] = [];
@@ -298,13 +281,11 @@ function dwtDecompose2D(input: number[][], wavelet: DWTWavelet, levels: number):
     return { detailLevels, approx: current };
 }
 
-/**
- * 浠庡灞傚垎瑙ｇ粨鏋滈€嗗悜閲嶅缓瀹屾暣鐭╅樀銆? * 浠庢渶绮楀眰锛堟渶娣卞眰锛夊紑濮嬶紝閫愬眰鍚戜笂 IDWT銆? */
+/** Reconstruct matrix from multi-level 2D DWT decomposition. */
 function dwtReconstruct2D(decomp: DWT2DDecomposition, wavelet: DWTWavelet): number[][] {
     const filter = getFilter(wavelet);
     let current = decomp.approx;
 
-    // 浠庢渶娣卞眰鍚戝閫愬眰閲嶅缓
     for (let l = decomp.detailLevels.length - 1; l >= 0; l--) {
         const dl = decomp.detailLevels[l];
         const level: DWT2DLevel = {
@@ -321,19 +302,15 @@ function dwtReconstruct2D(decomp: DWT2DDecomposition, wavelet: DWTWavelet): numb
     return current;
 }
 
-// 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 闃堝€煎寲 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/**
- * 纭槇鍊硷細|x| < 位 鐨勭郴鏁扮洿鎺ョ疆闆讹紝鍏朵綑淇濇寔涓嶅彉銆? * 淇濈暀鍘熷绯绘暟骞呭害锛岄噸寤烘洿閿愬埄浣嗗彲鑳芥湁鎸搩銆? */
+/** Hard thresholding: set coefficients with |x| < lambda to zero. */
 function hardThreshold(mat: number[][], lambda: number): number[][] {
     return mat.map(row =>
         row.map(v => Math.abs(v) < lambda ? 0 : v),
     );
 }
 
-/**
- * 杞槇鍊硷細|x| < 位 缃浂锛屽惁鍒欏悜闆舵敹缂?位銆? * sign(x) 路 max(0, |x| - 位)
- * 閲嶅缓鏇村钩婊戯紝瑙嗚涓婃洿"鏌斿拰"銆? */
+/** Soft thresholding: sign(x) * max(0, |x| - lambda). */
 function softThreshold(mat: number[][], lambda: number): number[][] {
     return mat.map(row =>
         row.map(v => {
@@ -344,8 +321,7 @@ function softThreshold(mat: number[][], lambda: number): number[][] {
     );
 }
 
-/**
- * 瀵瑰垎瑙ｇ粨鏋滅殑鎵€鏈夌粏鑺傚瓙甯︽墽琛岄槇鍊煎寲銆? * 娉ㄦ剰锛歀L锛堣繎浼煎瓙甯︼級涓嶅仛闃堝€煎寲锛屽畠淇濆瓨鍥惧儚鐨勪富浣撹兘閲忋€? */
+/** Apply thresholding to detail sub-bands; keep LL unchanged. */
 function applyThreshold(
     decomp: DWT2DDecomposition,
     threshold: number,
@@ -362,15 +338,13 @@ function applyThreshold(
     }));
 
     return {
-        approx: decomp.approx, // LL 瀛愬甫涓嶅仛闃堝€煎寲
+        approx: decomp.approx, // Keep LL unchanged.
         detailLevels: newDetails,
     };
 }
 
-// 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 鍘嬬缉鐜囪緟鍔╄绠?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/**
- * 缁熻鍒嗚В缁撴灉涓潪闆剁郴鏁扮殑涓暟锛岀敤浜庝及绠楀帇缂╃巼銆? */
+/** Count total/non-zero coefficients in a decomposition. */
 function countNonZeroCoefficients(decomp: DWT2DDecomposition): { total: number; nonZero: number } {
     let total = 0;
     let nonZero = 0;
@@ -384,10 +358,8 @@ function countNonZeroCoefficients(decomp: DWT2DDecomposition): { total: number; 
         }
     };
 
-    // LL 杩戜技瀛愬甫
     countMat(decomp.approx);
 
-    // 鍚勫眰缁嗚妭瀛愬甫
     for (const dl of decomp.detailLevels) {
         countMat(dl.LH);
         countMat(dl.HL);
@@ -595,19 +567,8 @@ export function suggestDWTThresholdForTargetRatio(
     };
 }
 
-// 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ 涓诲叆鍙ｅ嚱鏁?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/**
- * DWT 鍥惧儚鍘嬬缉涓诲嚱鏁般€? *
- * 娴佺▼锛? * 1. 灏?ImageData 鎷嗗垎涓?R/G/B 涓変釜 number[][] 鐭╅樀
- * 2. 瀵规瘡涓€氶亾鎵ц澶氬眰 2D DWT 鍒嗚В
- * 3. 瀵圭粏鑺傜郴鏁板仛闃堝€煎寲锛堝帇缂╋級
- * 4. 閫?DWT 閲嶅缓鍚勯€氶亾
- * 5. 鍚堝苟閫氶亾涓?ImageData 杈撳嚭
- *
- * @param imageData  鍘熷鍥惧儚
- * @param params     DWT 鍙傛暟锛堝皬娉㈠熀銆佸眰鏁般€侀槇鍊煎己搴︺€侀槇鍊兼ā寮忥級
- * @returns          鍘嬬缉缁撴灉锛堥噸寤哄浘鍍?+ 鍘嬬缉鐜囩瓑淇℃伅锛? */
+/** DWT image compression entry. */
 export function compressImageByDWT(imageData: ImageData, params: DWTParams): CompressionResult {
     const { wavelet, levels, threshold, thresholdMode } = params;
 
@@ -615,19 +576,16 @@ export function compressImageByDWT(imageData: ImageData, params: DWTParams): Com
     const safe = new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
     const { r, g, b, width, height } = imageDataToRGBMatrices(safe);
 
-    // 闄愬埗鍒嗚В灞傛暟锛氫笉鑳借秴杩?log2(min(width, height))
     const filterLength = getFilter(wavelet).lo_d.length;
     const maxLevels = computeMaxWaveletLevels(width, height, filterLength);
     const safeLevels = Math.min(levels, maxLevels);
 
-    // 瀵?R/G/B 涓夐€氶亾鍒嗗埆鍋?DWT 鈫?闃堝€煎寲 鈫?IDWT
     const processChannel = (channel: Matrix): { result: Matrix; nonZero: number; total: number } => {
         const decomp = dwtDecompose2D(channel, wavelet, safeLevels);
         const thresholded = applyThreshold(decomp, threshold, thresholdMode);
         const { total, nonZero } = countNonZeroCoefficients(thresholded);
         const reconstructed = dwtReconstruct2D(thresholded, wavelet);
 
-        // 瑁佸壀鍒?[0, 255]
         const clamped = reconstructed.map(row =>
             row.map(v => Math.max(0, Math.min(255, Math.round(v)))),
         );

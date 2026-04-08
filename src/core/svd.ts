@@ -3,18 +3,18 @@ import { cloneMatrix, multiply, transpose, zeros } from './matrix';
 
 const EPS = Number.EPSILON;
 
-/** SVD 璁＄畻妯″紡 */
+/** SVD 计算模式 */
 export type SVDMode = 'full' | 'randomized';
 
 export interface SVDOptions {
     copyInput?: boolean;
-    /** 'full' = Householder 鍙屽瑙掑寲 + Wilkinson 杩唬锛?randomized' = Halko-Martinsson-Tropp 闅忔満 SVD */
+    /** 'full' = Householder 双对角化 + Wilkinson 迭代；'randomized' = 随机 SVD */
     mode?: SVDMode;
-    /** 闅忔満 SVD 鐨勭洰鏍囩З锛堜粎 mode='randomized' 鏃舵湁鏁堬級 */
+    /** 随机 SVD 的目标秩（仅 mode='randomized' 时有效） */
     rank?: number;
-    /** 闅忔満 SVD 杩囬噰鏍锋暟锛堥粯璁?10锛?*/
+    /** 随机 SVD 的过采样数（默认 10） */
     oversampling?: number;
-    /** 闅忔満 SVD 骞傝凯浠ｆ鏁帮紙榛樿 1锛屾彁楂樿繎浼肩簿搴︼級 */
+    /** 随机 SVD 的幂迭代次数（默认 1） */
     powerIterations?: number;
 }
 
@@ -29,7 +29,9 @@ function signNonZero(x: number): number {
 }
 
 /**
- * 绠楁硶 3.2.1锛坔ouse锛? * 杈撳叆鍚戦噺 x锛岃緭鍑?Householder 鍚戦噺 v 涓庣郴鏁?beta銆? */
+ * 算法 3.2.1（Householder 向量）
+ * 输入向量 x，输出反射向量 v 和系数 beta。
+ */
 function house(xInput: number[]): { v: number[]; beta: number } {
     const n = xInput.length;
     const v = new Array<number>(n).fill(0);
@@ -72,7 +74,7 @@ function house(xInput: number[]): { v: number[]; beta: number } {
     return { v, beta };
 }
 
-/** U <- U * H锛屽叾涓?H = I - beta * v * v^T 浣滅敤鍦ㄥ垪鍖洪棿 start.. */
+/** U <- U * H，其中 H = I - beta * v * v^T，作用在列区间 start.. */
 function applyHouseholderToRight(orth: Matrix, start: number, v: number[], beta: number): void {
     if (beta === 0) return;
     const rows = orth.length;
@@ -90,9 +92,9 @@ function applyHouseholderToRight(orth: Matrix, start: number, v: number[], beta:
 }
 
 /**
- * mat <- mat * G^T锛屽叾涓?G = [c s; -s c]锛孏^T = [c -s; s c]
- * 浣滅敤鍦ㄥ垪 p, q銆? *
- * givens(a, b) 杩斿洖鐨?(c, s) 婊¤冻 G * [a; b] = [r; 0]銆? * 瀵瑰簲鍙充箻 G^T 鏃讹細[a, b] * G^T = [a*c+b*s, -a*s+b*c]锛? * 褰?(a,b) = givens 鐨勮緭鍏ユ椂绗簩鍒嗛噺琚秷闆躲€? */
+ * mat <- mat * G^T，其中 G = [c s; -s c]。
+ * 作用在列 p, q。
+ */
 function applyRightRotation(mat: Matrix, p: number, q: number, c: number, s: number): void {
     const rows = mat.length;
     for (let i = 0; i < rows; i += 1) {
@@ -104,9 +106,9 @@ function applyRightRotation(mat: Matrix, p: number, q: number, c: number, s: num
 }
 
 /**
- * mat <- G * mat锛屽叾涓?G = [c s; -s c]
- * 浣滅敤鍦ㄨ p, q銆? *
- * G * [a; b] = [c*a + s*b; -s*a + c*b]锛? * 褰?(a,b) = givens 鐨勮緭鍏ユ椂绗簩鍒嗛噺琚秷闆躲€? */
+ * mat <- G * mat，其中 G = [c s; -s c]。
+ * 作用在行 p, q。
+ */
 function applyLeftRotation(mat: Matrix, p: number, q: number, c: number, s: number): void {
     const cols = mat[0]?.length ?? 0;
     for (let j = 0; j < cols; j += 1) {
@@ -118,7 +120,8 @@ function applyLeftRotation(mat: Matrix, p: number, q: number, c: number, s: numb
 }
 
 /**
- * 璁＄畻 Givens 鏃嬭浆鍙傛暟銆? * 杩斿洖 (c, s, r) 浣垮緱 G * [a; b] = [r; 0]锛屽叾涓?G = [c s; -s c]銆? */
+ * Givens 参数：返回 (c, s, r)，使 G * [a; b] = [r; 0]。
+ */
 function givens(a: number, b: number): { c: number; s: number; r: number } {
     if (b === 0) {
         return { c: 1, s: 0, r: a };
@@ -143,41 +146,103 @@ function normInf(mat: Matrix): number {
 }
 
 /**
- * 娓呯悊涓婂弻瀵硅鐭╅樀涓殑鏁板€煎櫔澹帮細
- * 浠呬繚鐣欎富瀵硅绾?(i,i) 鍜岃秴瀵硅绾?(i,i+1)锛屽叾浣欎綅缃嫢灏忎簬 eps 鍒欑疆闆躲€? */
+ * 清理双对角外的小噪声：仅保留主对角 (i,i) 与超对角 (i,i+1)。
+ */
 function cleanBidiagonalNoise(B: Matrix, eps: number): void {
     const n = B.length;
     for (let i = 0; i < n; i += 1) {
         for (let j = 0; j < n; j += 1) {
-            if (j !== i && j !== i + 1) {
-                if (Math.abs(B[i][j]) <= eps) B[i][j] = 0;
+            if (j !== i && j !== i + 1 && Math.abs(B[i][j]) <= eps) {
+                B[i][j] = 0;
             }
         }
     }
 }
 
 /**
- * 闆跺瑙掑厓绱?deflation锛? * 褰撴椿璺冨尯闂?[l, r] 涓煇涓瑙掑厓绱?B[i][i] 鈮?0 鏃讹紝
- * 浣跨敤 Givens 鏃嬭浆娑堥櫎璇ヨ鐨勮秴瀵硅鍏冪礌 B[i][i+1]锛? * 浠庤€屽皢闂鍒嗚В涓烘洿灏忕殑瀛愰棶棰樸€? * 杩斿洖 true 琛ㄧず鎵ц浜?deflation锛堝簲璺宠繃鏈疆 Wilkinson step锛夈€? */
-function deflateZeroDiagonal(B: Matrix, P: Matrix, l: number, r: number, eps: number): boolean {
-    for (let i = l; i < r; i += 1) {
-        if (Math.abs(B[i][i]) <= eps) {
-            // B[i][i] 鈮?0锛岀敤宸︽棆杞緷娆℃秷闄?B[i][i+1], B[i][i+2], ..., B[i][r]
-            for (let j = i + 1; j <= r; j += 1) {
-                if (B[i][j] === 0) continue;
-                const g = givens(B[j][j], B[i][j]);
-                // 宸︽棆杞綔鐢ㄥ湪琛?j, i锛堟敞鎰忛『搴忥細闆跺寲 B[i][j]锛?                applyLeftRotation(B, j, i, g.c, g.s);
-                applyRightRotation(P, j, i, g.c, g.s);
-            }
-            B[i][i] = 0;
-            return true;
+ * 课本算法 7.6.3 第 (3) 步收敛判定：
+ * (i) 小超对角元置零；(ii) 小对角元置零。
+ */
+function textbookConvergenceSweep(B: Matrix, eps: number): void {
+    const n = B.length;
+    const diagTol = normInf(B) * eps;
+
+    for (let i = 0; i < n - 1; i += 1) {
+        const tol = (Math.abs(B[i][i]) + Math.abs(B[i + 1][i + 1])) * eps;
+        if (Math.abs(B[i][i + 1]) <= tol) {
+            B[i][i + 1] = 0;
+        }
+        if (Math.abs(B[i + 1][i]) <= tol) {
+            B[i + 1][i] = 0;
         }
     }
+
+    for (let i = 0; i < n; i += 1) {
+        if (Math.abs(B[i][i]) <= diagTol) {
+            B[i][i] = 0;
+        }
+    }
+}
+
+function isDiagonalized(B: Matrix): boolean {
+    const n = B.length;
+    for (let i = 0; i < n - 1; i += 1) {
+        if (B[i][i + 1] !== 0) return false;
+    }
+    return true;
+}
+
+/**
+ * 找到 B22 的活跃子块区间 [l, r]。
+ * 若已完全对角化，返回 null。
+ */
+function findActiveBlock(B: Matrix): { l: number; r: number } | null {
+    const n = B.length;
+
+    let r = -1;
+    for (let i = n - 2; i >= 0; i -= 1) {
+        if (B[i][i + 1] !== 0) {
+            r = i + 1;
+            break;
+        }
+    }
+    if (r < 0) return null;
+
+    let l = r - 1;
+    while (l > 0 && B[l - 1][l] !== 0) {
+        l -= 1;
+    }
+
+    return { l, r };
+}
+
+/**
+ * 算法 7.6.3 第 (4)(i) 步：
+ * 若 B22 中出现零对角元（最后一个除外），用 Givens 追赶消元。
+ */
+function deflateZeroDiagonal(B: Matrix, P: Matrix, l: number, r: number, eps: number): boolean {
+    const diagTol = normInf(B) * eps;
+
+    for (let i = l; i < r; i += 1) {
+        if (Math.abs(B[i][i]) > diagTol) continue;
+
+        for (let j = i + 1; j <= r; j += 1) {
+            if (B[i][j] === 0) continue;
+            const g = givens(B[j][j], B[i][j]);
+            applyLeftRotation(B, j, i, g.c, g.s);
+            applyRightRotation(P, j, i, g.c, g.s);
+        }
+
+        B[i][i] = 0;
+        return true;
+    }
+
     return false;
 }
 
 /**
- * 绠楁硶 7.6.2 鐨?Wilkinson 浣嶇Щ鎬濇兂锛屼綔鐢ㄤ簬 B(l:r,l:r)銆? */
+ * 课本算法 7.6.2：对活跃子块 B(l:r,l:r) 执行一次带 Wilkinson 位移的 SVD 迭代。
+ */
 function wilkinsonSvdStep(B: Matrix, P: Matrix, Q: Matrix, l: number, r: number): void {
     if (r <= l) return;
 
@@ -185,19 +250,18 @@ function wilkinsonSvdStep(B: Matrix, P: Matrix, Q: Matrix, l: number, r: number)
     const gammaPrev = r - 2 >= l ? B[r - 2][r - 1] : 0;
     const delta = (B[r - 1][r - 1] * B[r - 1][r - 1] + gammaPrev * gammaPrev - alpha) / 2;
     const beta = B[r - 1][r - 1] * B[r - 1][r];
+
     const denom = delta + signNonZero(delta) * Math.sqrt(delta * delta + beta * beta);
-    const mu = alpha - (Math.abs(denom) < EPS ? 0 : (beta * beta) / denom);
+    const mu = Math.abs(denom) <= EPS ? alpha : alpha - (beta * beta) / denom;
 
     let y = B[l][l] * B[l][l] - mu;
     let z = B[l][l] * B[l][l + 1];
 
     for (let k = l; k < r; k += 1) {
-        // Right rotation to annihilate z in [y, z].
         const right = givens(y, z);
         applyRightRotation(B, k, k + 1, right.c, right.s);
         applyRightRotation(Q, k, k + 1, right.c, right.s);
 
-        // 宸︽棆杞秷闆剁敱鍙虫棆杞骇鐢熺殑涓嬪瑙掑厓绱?B[k+1][k]
         const left = givens(B[k][k], B[k + 1][k]);
         applyLeftRotation(B, k, k + 1, left.c, left.s);
         applyRightRotation(P, k, k + 1, left.c, left.s);
@@ -209,112 +273,46 @@ function wilkinsonSvdStep(B: Matrix, P: Matrix, Q: Matrix, l: number, r: number)
     }
 }
 
-function allSuperDiagonalSmall(B: Matrix, eps: number): boolean {
-    const n = B.length;
-    for (let i = 0; i < n - 1; i += 1) {
-        const tol = eps * (Math.abs(B[i][i]) + Math.abs(B[i + 1][i + 1]) + 1);
-        if (Math.abs(B[i][i + 1]) > tol) return false;
-    }
-    return true;
-}
-
-function runWilkinsonPass(
-    B: Matrix,
-    P: Matrix,
-    Q: Matrix,
-    eps: number,
-    maxIter: number,
-): boolean {
-    const n = B.length;
-
-    for (let iter = 0; iter < maxIter; iter += 1) {
-        // Convergence check: zero-out tiny off-diagonal noise.
-        for (let i = 0; i < n - 1; i += 1) {
-            const tol = eps * (Math.abs(B[i][i]) + Math.abs(B[i + 1][i + 1]) + 1);
-            if (Math.abs(B[i][i + 1]) <= tol) {
-                B[i][i + 1] = 0;
-            }
-            if (Math.abs(B[i + 1][i]) <= tol) {
-                B[i + 1][i] = 0;
-            }
-        }
-
-        if (allSuperDiagonalSmall(B, eps)) {
-            break;
-        }
-
-        // 鎵炬椿璺冨瓙鐭╅樀 [l, r]锛氫粠搴曢儴鎵剧涓€涓潪闆惰秴瀵硅
-        let r = -1;
-        for (let i = n - 2; i >= 0; i -= 1) {
-            if (B[i][i + 1] !== 0) {
-                r = i + 1;
-                break;
-            }
-        }
-        if (r === -1) break;
-
-        let l = r - 1;
-        while (l > 0 && B[l - 1][l] !== 0) {
-            l -= 1;
-        }
-
-        // Zero-diagonal deflation (Golub-Van Loan 8.6.2).
-        if (deflateZeroDiagonal(B, P, l, r, eps)) {
-            cleanBidiagonalNoise(B, eps);
-            continue;
-        }
-
-        wilkinsonSvdStep(B, P, Q, l, r);
-        cleanBidiagonalNoise(B, eps);
-    }
-
-    return allSuperDiagonalSmall(B, eps);
-}
-
+/**
+ * 课本算法 7.6.3：
+ * 在双对角矩阵 B 上迭代，得到 B = P^T * B * Q 的近似对角化结果。
+ */
 function diagWithWilkinson(B: Matrix): { P: Matrix; Q: Matrix } {
     const n = B.length;
     const P = identity(n);
     const Q = identity(n);
 
-    const scale = Math.max(1, normInf(B));
-    const baseEps = Math.sqrt(EPS) * scale;
-    const baseIter = Math.max(80 * n * n, 2000);
+    const eps = Math.sqrt(EPS);
+    const maxIter = Math.max(400 * n * n, 4000);
 
-    const attempts = [
-        { epsScale: 1, iterScale: 1 },
-        { epsScale: 4, iterScale: 0.45 },
-        { epsScale: 16, iterScale: 0.3 },
-    ];
+    for (let iter = 0; iter < maxIter; iter += 1) {
+        textbookConvergenceSweep(B, eps);
+        cleanBidiagonalNoise(B, normInf(B) * eps);
 
-    for (let attempt = 0; attempt < attempts.length; attempt += 1) {
-        const { epsScale, iterScale } = attempts[attempt];
-        const eps = baseEps * epsScale;
-        const maxIter = Math.max(200, Math.floor(baseIter * iterScale));
-
-        if (runWilkinsonPass(B, P, Q, eps, maxIter)) {
-            if (attempt === 0) {
-                return { P, Q };
-            }
-
-            cleanBidiagonalNoise(B, eps * 0.5);
-            if (allSuperDiagonalSmall(B, eps)) {
-                return { P, Q };
-            }
+        if (isDiagonalized(B)) {
+            return { P, Q };
         }
 
-        cleanBidiagonalNoise(B, eps * 2);
+        const active = findActiveBlock(B);
+        if (!active) {
+            return { P, Q };
+        }
+
+        const { l, r } = active;
+
+        if (deflateZeroDiagonal(B, P, l, r, eps)) {
+            cleanBidiagonalNoise(B, normInf(B) * eps);
+            continue;
+        }
+
+        wilkinsonSvdStep(B, P, Q, l, r);
+        cleanBidiagonalNoise(B, normInf(B) * eps);
     }
 
-    const fallbackEps = baseEps * 64;
-    cleanBidiagonalNoise(B, fallbackEps);
-    if (allSuperDiagonalSmall(B, fallbackEps)) {
-        return { P, Q };
-    }
-
-    return { P, Q };
+    throw new Error('SVD 迭代未在最大次数内收敛。');
 }
 
-// 鈹€鈹€鈹€ 鍏?SVD锛圚ouseholder 鍙屽瑙掑寲 + Wilkinson 杩唬锛?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ---------------- 全 SVD（Householder 双对角化 + Wilkinson 迭代） ----------------
 
 function computeSVDTall(input: Matrix): SVDResult {
     const A = cloneMatrix(input);
@@ -324,7 +322,7 @@ function computeSVDTall(input: Matrix): SVDResult {
         return { U: [], S: [], Vt: [] };
     }
 
-    // Algorithm 7.6.1: Householder bidiagonalization with accumulated U, V.
+    // 算法 7.6.1：双对角化，并累计正交矩阵 U、V。
     const Ufull = identity(m);
     const V = identity(n);
 
@@ -374,7 +372,7 @@ function computeSVDTall(input: Matrix): SVDResult {
         }
     }
 
-    // Extract bidiagonal block B (n x n).
+    // 提取 n x n 上双对角块 B。
     const B = zeros(n, n);
     for (let i = 0; i < n; i += 1) {
         B[i][i] = A[i][i];
@@ -383,10 +381,9 @@ function computeSVDTall(input: Matrix): SVDResult {
         }
     }
 
-    // Algorithm 7.6.2/7.6.3: Wilkinson-shift diagonalization.
     const { P, Q } = diagWithWilkinson(B);
 
-    // U = U * diag(P, I_{m-n}), only keep first n columns.
+    // U = U * diag(P, I_{m-n})，仅保留前 n 列。
     const Uleft = zeros(m, n);
     for (let i = 0; i < m; i += 1) {
         for (let j = 0; j < n; j += 1) {
@@ -408,7 +405,7 @@ function computeSVDTall(input: Matrix): SVDResult {
         S[i] = sigma;
     }
 
-    // Sort singular values descending and reorder U/Vt accordingly.
+    // 奇异值按降序排列，并同步重排 U/V。
     const order = S.map((sv, idx) => ({ sv, idx })).sort((a, b) => b.sv - a.sv).map((e) => e.idx);
 
     const Usorted = U.map((row) => order.map((idx) => row[idx]));
@@ -422,9 +419,9 @@ function computeSVDTall(input: Matrix): SVDResult {
     };
 }
 
-// 鈹€鈹€鈹€ 闅忔満 SVD锛圚alko-Martinsson-Tropp, 2011锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ---------------- 随机 SVD（用于可选快速近似） ----------------
 
-/** Box-Muller 鍙樻崲鐢熸垚鏍囧噯姝ｆ€侀殢鏈烘暟 */
+/** Box-Muller 变换生成标准正态随机数 */
 function randn(): number {
     let u1 = 0;
     let u2 = 0;
@@ -433,7 +430,7 @@ function randn(): number {
     return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
 }
 
-/** 鐢熸垚 m x n 鐨勯珮鏂殢鏈虹煩闃?*/
+/** 生成 m x n 的高斯随机矩阵 */
 function gaussianRandom(m: number, n: number): Matrix {
     const out = zeros(m, n);
     for (let i = 0; i < m; i += 1) {
@@ -445,8 +442,8 @@ function gaussianRandom(m: number, n: number): Matrix {
 }
 
 /**
- * Householder 钖?QR 鍒嗚В锛欰 = Q * R
- * A: m x n (m >= n)锛岃繑鍥?Q: m x n, R: n x n
+ * Householder 版 thin QR：A = Q * R
+ * A: m x n (m >= n)，返回 Q: m x n, R: n x n
  */
 function thinQR(Ainput: Matrix): { Q: Matrix; R: Matrix } {
     const m = Ainput.length;
@@ -460,7 +457,6 @@ function thinQR(Ainput: Matrix): { Q: Matrix; R: Matrix } {
         const { v, beta } = house(x);
         if (beta === 0) continue;
 
-        // R(k:m, k:n) <- (I - beta*v*v^T) * R(k:m, k:n)
         for (let j = k; j < n; j += 1) {
             let dot = 0;
             for (let i = 0; i < v.length; i += 1) {
@@ -472,11 +468,9 @@ function thinQR(Ainput: Matrix): { Q: Matrix; R: Matrix } {
             }
         }
 
-        // 绱Н Q = Q * H_k
         applyHouseholderToRight(Qfull, k, v, beta);
     }
 
-    // 鎻愬彇 thin Q (m x n) 鍜?upper-triangular R (n x n)
     const Q = zeros(m, n);
     for (let i = 0; i < m; i += 1) {
         for (let j = 0; j < n; j += 1) {
@@ -494,7 +488,7 @@ function thinQR(Ainput: Matrix): { Q: Matrix; R: Matrix } {
     return { Q, R: Rthin };
 }
 
-/** mat^T * mat2 鐨勯珮鏁堣绠楋紝閬垮厤鏄惧紡杞疆 */
+/** 高效计算 A^T * B，避免显式转置 */
 function multiplyAtB(A: Matrix, B: Matrix): Matrix {
     const m = A.length;
     const nA = A[0]?.length ?? 0;
@@ -513,14 +507,9 @@ function multiplyAtB(A: Matrix, B: Matrix): Matrix {
 }
 
 /**
- * 闅忔満 SVD锛? * 缁欏畾 m x n 鐭╅樀 A 鍜岀洰鏍囩З k锛岃繑鍥炶繎浼肩殑绉?k SVD銆? *
- * 绠楁硶锛圚alko-Martinsson-Tropp, 2011锛夛細
- * 1. 惟 = randn(n, k+p)
- * 2. Y = A * 惟                 (m x (k+p))
- * 3. 锛堝彲閫夛級骞傝凯浠ｆ彁鍗囩簿搴? * 4. Q, _ = QR(Y)              (m x (k+p))
- * 5. B = Q^T * A               ((k+p) x n)
- * 6. SVD(B) = Ub * S * Vt
- * 7. U = Q * Ub, 鎴柇鍒板墠 k 涓? */
+ * 随机 SVD（Halko-Martinsson-Tropp, 2011）
+ * 返回矩阵 A 的秩-k 近似分解。
+ */
 function computeRandomizedSVD(
     input: Matrix,
     targetRank: number,
@@ -539,47 +528,30 @@ function computeRandomizedSVD(
     const p = Math.min(oversampling, Math.min(m, n) - k);
     const l = k + p;
 
-    // 鑻ョ洰鏍囩З >= min(m,n)锛岀洿鎺ヤ娇鐢ㄥ叏 SVD
     if (l >= Math.min(m, n)) {
         return computeSVDFull(input);
     }
 
-    // Step 1: 闅忔満閲囨牱鐭╅樀
     const omega = gaussianRandom(n, l);
-
-    // Step 2: Y = A * Omega
     let Y = multiply(A, omega);
 
-    // Step 3: power iterations to improve approximation.
     for (let q = 0; q < powerIter; q += 1) {
-        // 姝ｄ氦鍖?Y
         const qr1 = thinQR(Y);
-        // Z = A^T * Q1
         const Z = multiplyAtB(A, qr1.Q);
-        // 姝ｄ氦鍖?Z
         const qr2 = thinQR(Z);
-        // Y = A * Q2
         Y = multiply(A, qr2.Q);
     }
 
-    // Step 4: QR(Y) 鈫?Q
     const { Q } = thinQR(Y);
-
-    // Step 5: B = Q^T * A
     const B = multiplyAtB(Q, A);
-
-    // Step 6: 瀵瑰皬鐭╅樀 B 鍋氱簿纭?SVD
     const svdB = computeSVDFull(B);
 
-    // Step 7: U = Q * Ub, then truncate to top-k.
     const Ub = svdB.U;
     const Ufinal = multiply(Q, Ub);
 
-    // 鎴柇
     const Utrunc = Ufinal.map((row) => row.slice(0, k));
     const Strunc = svdB.S.slice(0, k);
-    const VtFull = svdB.Vt;
-    const VtTrunc = VtFull.slice(0, k);
+    const VtTrunc = svdB.Vt.slice(0, k);
 
     return {
         U: Utrunc,
@@ -588,10 +560,10 @@ function computeRandomizedSVD(
     };
 }
 
-// 鈹€鈹€鈹€ 瀵瑰鎺ュ彛 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ---------------- 对外入口 ----------------
 
 /**
- * 鍏?SVD 鍒嗚В锛堝唴閮ㄥ嚱鏁帮紝鑷姩澶勭悊 m < n 鐨勬儏鍐碉級
+ * 全 SVD（内部函数，自动处理 m < n 的情况）
  */
 function computeSVDFull(input: Matrix): SVDResult {
     const A = cloneMatrix(input);
@@ -616,9 +588,11 @@ function computeSVDFull(input: Matrix): SVDResult {
 }
 
 /**
- * 浣滀笟瑕佹眰锛歋VD 蹇呴』鎵嬪姩瀹炵幇锛屼笉鍙皟鐢ㄧ幇鎴愬簱鍑芥暟銆? *
- * 鏀寔涓ょ妯″紡锛? * - 'full'锛堥粯璁わ級锛欻ouseholder 鍙屽瑙掑寲 + Wilkinson 浣嶇Щ杩唬锛岀簿纭叏鍒嗚В
- * - 'randomized'锛欻alko-Martinsson-Tropp 闅忔満 SVD锛岄€傚悎澶х煩闃典綆绉╄繎浼? */
+ * 作业要求：SVD 必须手动实现，不调用现成库。
+ * 支持两种模式：
+ * - full：课本流程（Householder 双对角化 + Wilkinson 迭代）
+ * - randomized：随机 SVD 近似
+ */
 export function computeSVD(input: Matrix, options?: SVDOptions): SVDResult {
     const shouldCopy = options?.copyInput ?? true;
     const A = shouldCopy ? cloneMatrix(input) : input;
@@ -635,4 +609,3 @@ export function computeSVD(input: Matrix, options?: SVDOptions): SVDResult {
 
     return computeSVDFull(A);
 }
-
