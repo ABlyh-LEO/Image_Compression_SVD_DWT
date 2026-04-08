@@ -1,0 +1,1 @@
+{"root":["./src/app.ts","./src/main.ts","./src/types.ts","./src/vite-env.d.ts","./src/core/compress.ts","./src/core/compression-ratio.ts","./src/core/dwt.ts","./src/core/image-io.ts","./src/core/matrix.ts","./src/core/metrics.ts","./src/core/svd.ts","./src/ui/controls.ts","./src/ui/render.ts","./src/workers/svd-channel.worker.ts","./src/workers/svd.worker.ts"],"version":"5.9.3"}
