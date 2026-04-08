@@ -8,6 +8,7 @@ export function fitCanvasPreview(canvas: HTMLCanvasElement, maxWidth = 560, maxH
     if (canvas.width <= 0 || canvas.height <= 0) {
         canvas.style.width = '';
         canvas.style.height = '';
+        canvas.style.aspectRatio = '';
         return;
     }
 
@@ -15,6 +16,9 @@ export function fitCanvasPreview(canvas: HTMLCanvasElement, maxWidth = 560, maxH
     const heightScale = maxHeight / canvas.height;
     const scale = Math.min(widthScale, heightScale, 1);
 
+    // Only set one axis and keep the other axis auto to avoid any aspect-ratio distortion
+    // when extra CSS constraints (like max-width in responsive layout) are applied.
     canvas.style.width = `${Math.round(canvas.width * scale)}px`;
-    canvas.style.height = `${Math.round(canvas.height * scale)}px`;
+    canvas.style.height = 'auto';
+    canvas.style.aspectRatio = `${canvas.width} / ${canvas.height}`;
 }
